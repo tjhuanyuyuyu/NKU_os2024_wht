@@ -1,10 +1,7 @@
-# lab2：物理内存和页表
 
-***
+<h1 align="center" style="border: none;"><strong>lab2：物理内存和页表</strong></h1>
+<h2 align="center" style="border: none;">涂佳欢语2213235 王婷睿2210578 胡可玉2212913</h2>
 
-#### 小组成员：涂佳欢语2213235 王婷睿2210578 胡可玉2212913
-
-***
 
 ## 一、实验目的
 
@@ -105,6 +102,13 @@ const struct pmm_manager default_pmm_manager = {
 };
 ```
 
+```c++
+static free_area_t free_area;
+#define free_list (free_area.free_list)
+#define nr_free (free_area.nr_free)
+```
+这行代码定义了一个静态变量 `free_area`，它的类型是 `free_area_t`。`free_area_t` 结构体通常用于管理空闲内存块，包含一个空闲列表和一个用于记录空闲块数量的字段。`static` 关键字表示该变量只在当前文件范围内可见，其他文件无法访问。下面两行宏定义将 `free_area` 结构体中的 `free_list` 和 `nr_free` 字段分别简化为 `free_list` 和 `nr_free`，方便代码中使用。这种方式减少了重复引用结构体字段的代码长度，使代码更简洁。
+
 default_init()
 ```c++
 static void
@@ -118,9 +122,9 @@ default_init(void) {
 default_init_memmap
 
 ```c++
-static void
-default_init_memmap(struct Page *base, size_t n) {//为一段连续的内存页设置初始状态，并将它们加入空闲页列表  
-    assert(n > 0);//内存页的起始指针 base 和一个大小 n
+static void  //为一段连续的内存页设置初始状态，并将它们加入空闲页列表  
+default_init_memmap(struct Page *base, size_t n) {  //内存页的起始指针 base 和一个大小 n
+    assert(n > 0);//使用assert宏，确保传入的n是大于 0 的。如果 n <= 0，程序将会中止执行。此检查用于防止无效的内存块初始化请求。
     struct Page *p = base;
     for (; p != base + n; p ++) {//遍历从 base 到 base + n 的每个内存页
         assert(PageReserved(p));
