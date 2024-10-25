@@ -1,8 +1,7 @@
-#include <list.h>
+/*#include <list.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
-#include <stdlib.h> 
 #include "best_fit_pmm.c" 
 #include<pmm.h>
 #include<slub_pmm.h>
@@ -186,4 +185,4 @@ void slub_check(void) {
 
     // 再次打印slab信息
     print_slab_info(&kmalloc_caches[1]);
-}
+}*/
