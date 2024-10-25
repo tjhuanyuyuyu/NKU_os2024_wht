@@ -17,6 +17,7 @@ typedef struct buddy2 {
 
 struct buddy2 buddy;
 struct Page* current_base;
+unsigned npage = 1048576; //2^20
 
 // 初始化 buddy2 系统
 static buddy2_t *buddy2_new(unsigned size) {   
@@ -53,7 +54,6 @@ buddy_system_init(void) {
     nr_free = 0;
 
     // 初始化 buddy system
-    unsigned npage = 1048576; //2^20
     buddy2_new(npage);
 }
 
@@ -174,9 +174,14 @@ buddy_system_free_pages(struct Page *base, size_t n) {
         while(index >>= 1){
             order++;
         }
-
+        unsigned temp_size=1048576;
+        for (unsigned i = 0; i < 2 * order - 1; i++) {
+            if (IS_POWER_OF_2(i+1)) {
+                temp_size /= 2;
+            }
+        }
         //!!!!!确定是否为整个还有问题
-        if (left_size == right_size && left_size == (1 << (buddy.size - index - 1))) {
+        if (left_size == right_size && left_size == temp_size) {
             buddy.longest[index] = left_size * 2;
         } else {
             buddy.longest[index] = left_size>right_size?left_size:right_size;
@@ -249,91 +254,69 @@ basic_check(void) {
 // NOTICE: You SHOULD NOT CHANGE basic_check, default_check functions!
 static void
 buddy_system_check(void) {
-    int score = 0 ,sumscore = 6;
-    int count = 0, total = 0;
-    list_entry_t *le = &free_list;
-    while ((le = list_next(le)) != &free_list) {
-        struct Page *p = le2page(le, page_link);
-        assert(PageProperty(p));
-        count ++, total += p->property;
-    }
-    assert(total == nr_free_pages());
+    cprintf("buddy check%s\n", "!");
+    struct Page *p0, *p1, *p2, *A, *B, *C, *D;
+    p0 = p1 = p2 = A = B = C = D = NULL;
 
-    basic_check();
+    // cprintf("alloc p0\n");
+    assert((p0 = alloc_page()) != NULL);
+    // cprintf("alloc A\n");
+    assert((A = alloc_page()) != NULL);
+    // cprintf("alloc B\n");
+    assert((B = alloc_page()) != NULL);
 
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
-    struct Page *p0 = alloc_pages(5), *p1, *p2;
-    assert(p0 != NULL);
-    assert(!PageProperty(p0));
+    // cprintf("before free p0,A,B buddy[0] %u\n", buddy[0]);
 
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
-    list_entry_t free_list_store = free_list;
-    list_init(&free_list);
-    assert(list_empty(&free_list));
-    assert(alloc_page() == NULL);
+    assert(p0 != A && p0 != B && A != B);
+    assert(page_ref(p0) == 0 && page_ref(A) == 0 && page_ref(B) == 0);
 
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
-    unsigned int nr_free_store = nr_free;
-    nr_free = 0;
+    // cprintf("free p0\n");
+    free_page(p0);
+    // cprintf("free A\n");
+    free_page(A);
+    // cprintf("free B\n");
+    free_page(B);
+    // cprintf("after free p0,A,B buddy[0] %u\n", buddy[0]);
 
-    // * - - * -
-    free_pages(p0 + 1, 2);
-    free_pages(p0 + 4, 1);
-    assert(alloc_pages(4) == NULL);
-    assert(PageProperty(p0 + 1) && p0[1].property == 2);
-    // * - - * *
-    assert((p1 = alloc_pages(1)) != NULL);
-    assert(alloc_pages(2) != NULL);      // best fit feature
-    assert(p0 + 4 == p1);
+    p0 = alloc_pages(100);
+    p1 = alloc_pages(100);
+    A = alloc_pages(64);
+    B = alloc_pages(200);
+    C = alloc_pages(100);
 
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
-    p2 = p0 + 1;
-    free_pages(p0, 5);
-    assert((p0 = alloc_pages(5)) != NULL);
-    assert(alloc_page() == NULL);
+    // 检验p1和p2是否相邻，并且分配内存是否是大于分配内存的2的幂次
+    assert(p1 = p0 + 128);
+    // 检验A和p1是否相邻
+    assert(A == p1 + 128);
+    // 检验B分配是否遵循buddy_system算法
+    assert(B == A + 256);
+    // 检验B分配是否遵循buddy_system算法
+    assert(C == A + 128);
 
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
-    assert(nr_free == 0);
-    nr_free = nr_free_store;
+    // 检验p0释放后分配D是否使用了D的空间
+    free_page(p0);
+    D = alloc_pages(32);
+    assert(D == p0);
 
-    free_list = free_list_store;
-    free_pages(p0, 5);
+    // 检验释放后内存的合并是否正确
+    free_page(D);
+    free_page(p1);
+    p2 = alloc_pages(256);
+    assert(p0 == p2);
 
-    le = &free_list;
-    while ((le = list_next(le)) != &free_list) {
-        struct Page *p = le2page(le, page_link);
-        count --, total -= p->property;
-    }
-    assert(count == 0);
-    assert(total == 0);
-    #ifdef ucore_test
-    score += 1;
-    cprintf("grading: %d / %d points\n",score, sumscore);
-    #endif
+    free_page(p2);
+    free_page(A);
+    free_page(B);
+    free_page(C);
 }
 //这个结构体在
-const struct pmm_manager best_fit_pmm_manager = {
+const struct pmm_manager buddy_system_pmm_manager = {
     .name = "buddy_system_pmm_manager",
     .init = buddy_system_init,
     .init_memmap = buddy_system_init_memmap,
     .alloc_pages = buddy_system_alloc_pages,
     .free_pages = buddy_system_free_pages,
     .nr_free_pages = buddy_system_nr_free_pages,
-    .check = basic_check,
+    .check = buddy_system_check,
 };
 
