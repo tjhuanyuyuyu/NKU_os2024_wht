@@ -316,6 +316,149 @@ make grade结果如下：
 ![make grade result](best-fit_result.png) 
 
 ### 2.4、练习3：buddy system（伙伴系统）分配算法
+根据指导手册给出的网址以及网上搜索的一些资料，buddy_system通过将内存划分为不同大小的块，且每个块的大小都是2的幂。在本次实验中采用一个新的数据结构buddy2并采用二叉树来实现。
+1.创建和初始化buddy2
+```c++
+//创建数据结构
+typedef struct buddy2 {
+    unsigned size;
+    unsigned *longest;  // 用于管理树的数组
+} buddy2_t;
+
+// 初始化 buddy2 系统
+static buddy2_t *buddy2_new(unsigned size) {   
+    unsigned node_size;
+
+    if (size < 1 || !IS_POWER_OF_2(size)) {
+        return NULL;  // size 必须是 2 的幂
+    }
+
+    buddy.size = size;
+    node_size = size * 2;
+
+    for (unsigned i = 0; i < 2 * size - 1; i++) {
+        if (IS_POWER_OF_2(i+1)) {
+            node_size /= 2;
+        }
+        buddy.longest[i] = node_size;
+    }
+
+    return &buddy;
+}
+```c++
+
+2.利用buddy2来分配页。如果一个进程来请求分配内存，会先判断是不是2次幂，如果不是就会找到其最近的2次幂。从根节点开始找合适的块，如果块大于所需要的大小，就划分为所需要的大小。
+```c++
+static struct Page *
+buddy_system_alloc_pages(size_t n) {
+    assert(n > 0);
+    unsigned offset = 0;
+
+    if (n > nr_free) {
+        return NULL;
+    }
+
+    unsigned current_size = IS_POWER_OF_2(n) ? n : fixsize(n);
+
+    // 在 buddy system 中查找合适的块
+    unsigned index = 0;
+    unsigned node_size;
+    for (node_size = buddy.size; node_size != current_size; node_size /= 2) {
+        if (buddy.longest[2 * index + 1] >= current_size) {
+            index = 2 * index + 1;
+        } else {
+            index = 2 * index + 2;
+        }
+    }
+    if (buddy.longest[index] < n) {
+        return NULL;
+    }
+    buddy.longest[index]=0;
+    //从该节点往上修改相关的节点
+    while(index>0){
+        if(index%2==0){
+            index = (index - 2) / 2;
+        }
+        else{
+            index = (index - 1) / 2;
+        }
+        buddy.longest[index]=(buddy.longest[2 * index + 1] > buddy.longest[2 * index + 2]) ? buddy.longest[2 * index + 1] : buddy.longest[2 * index + 2];
+    }
+
+
+    // 找到合适的块，从链表中移除相应的页面
+    offset = (index + 1) * node_size - buddy.size;
+    struct Page *page = current_base+offset;
+    page->property=0;
+
+    unsigned page_size =fixsize(n);
+    nr_free -= page_size;
+
+    for(struct Page* i=page;i!=page+page_size;i++){
+        ClearPageProperty(i);
+    }
+
+    return page;
+}
+```c++
+
+3.当释放一个内存块时，系统会检查其伙伴块是否也空闲。如果是，两个伙伴块将合并成一个更大的块。这种合并过程可以重复进行，直到无法再合并。
+```c++
+static void 
+buddy_system_free_pages(struct Page *base, size_t n) {
+    assert(n > 0);
+
+    // 重置页面的 flags
+    unsigned size = IS_POWER_OF_2(n) ? n : fixsize(n);
+    struct Page *p = base;
+    for (; p != base + n; p++) {
+        assert(!PageReserved(p) && !PageProperty(p));
+        p->flags = 0;
+        set_page_ref(p, 0);
+    }
+    base->property = n;
+
+    // 确定起始节点的位置
+    unsigned offset = base - current_base;
+    unsigned index = offset + buddy.size - 1;
+    buddy.longest[index] = size;
+    nr_free += size;
+
+    //将该节点上面的节点加上释放的内存
+    while(index>0){
+        // 找到父节点位置
+        index = (index - 1) / 2;  
+
+        // 获取左子节点和右子节点的大小
+        unsigned left_size = buddy.longest[2 * index + 1];
+        unsigned right_size = buddy.longest[2 * index + 2];
+
+        // 如果左、右子节点都空闲且大小相等，则合并为更大的块
+        int order =0;
+        while(index >>= 1){
+            order++;
+        }
+        unsigned temp_size=1048576;
+        for (unsigned i = 0; i < 2 * order - 1; i++) {
+            if (IS_POWER_OF_2(i+1)) {
+                temp_size /= 2;
+            }
+        }
+        if (left_size == right_size && left_size == temp_size) {
+            buddy.longest[index] = left_size * 2;
+        } else {
+            buddy.longest[index] = left_size>right_size?left_size:right_size;
+        }
+    }
+
+     // 清除页面的属性
+    for (struct Page *i = p; i != p + size; i++) {
+        ClearPageProperty(i);
+    }
+}
+```c++
+
+
 
 ### 2.5、练习4：任意大小的内存单元slub分配算法
 
