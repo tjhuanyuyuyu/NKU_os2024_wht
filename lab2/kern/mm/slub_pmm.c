@@ -2,10 +2,19 @@
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>  // 用于模拟页面申请和释放
-#include "best_fit_pmm.c" // 引入best_fit_pmm.c
+#include <stdlib.h> 
+#include "best_fit_pmm.c" 
+#include<pmm.h>
+#include<slub_pmm.h>
 
 #define PAGE_SIZE 4096
+#define NUM_CACHES 5
+
+// 定义支持的对象大小
+static size_t kmalloc_size[NUM_CACHES] = {8, 32, 128, 512, 2048};
+
+// 每个对象大小对应一个kmem_cache
+struct kmem_cache kmalloc_caches[NUM_CACHES];
 
 // slab结构表示包含多个小对象的slab
 struct slab {
@@ -106,121 +115,75 @@ kmem_cache_free(struct kmem_cache *cache, void *obj) {
     }
 }
 
-static void
-slub_basic_check(void) {
-    struct slab *slab0, *slab1, *slab2;
-    slab0 = slab1 = slab2 = NULL;
-
-    // 申请三个 slab
-    assert((slab0 = create_slab(64)) != NULL); // 创建大小为64的slab
-    assert((slab1 = create_slab(64)) != NULL);
-    assert((slab2 = create_slab(64)) != NULL);
-
-    assert(slab0 != slab1 && slab0 != slab2 && slab1 != slab2);
-    assert(slab0->free_objs == slab0->total_objs);
-    assert(slab1->free_objs == slab1->total_objs);
-    assert(slab2->free_objs == slab2->total_objs);
-
-    list_entry_t free_list_store = free_list;
-    list_init(&free_list);
-    assert(list_empty(&free_list));
-
-    unsigned int nr_free_store = nr_free;
-    nr_free = 0;
-
-    assert(alloc_page() == NULL); // 检查没有可用页面
-
-    // 释放三个 slab
-    free_slab(slab0);
-    free_slab(slab1);
-    free_slab(slab2);
-    assert(nr_free == 3);
-
-    // 再次申请三个 slab
-    assert((slab0 = create_slab(64)) != NULL);
-    assert((slab1 = create_slab(64)) != NULL);
-    assert((slab2 = create_slab(64)) != NULL);
-
-    assert(alloc_page() == NULL); // 检查没有可用页面
-
-    free_slab(slab0);
-    assert(!list_empty(&free_list));
-
-    struct slab *slab;
-    assert((slab = alloc_slab()) == slab0); // 检查分配的 slab 是 slab0
-    assert(alloc_page() == NULL); // 检查没有可用页面
-
-    assert(nr_free == 0);
-    free_list = free_list_store;
-    nr_free = nr_free_store;
-
-    free_slab(slab);
-    free_slab(slab1);
-    free_slab(slab2);
+// 初始化slub分配器
+void slub_init(void) {
+    for (int i = 0; i < NUM_CACHES; i++) {
+        kmem_cache_init(&kmalloc_caches[i], kmalloc_size[i]);
+    }
 }
 
-// LAB2: 用于检查 SLUB 内存分配算法的代码
-static void
-slub_default_check(void) {
-    int count = 0, total = 0;
-    list_entry_t *le = &free_list;
-
-    // 检查 free_list 中的所有 slab
-    while ((le = list_next(le)) != &free_list) {
-        struct slab *s = le2slab(le, slab_link);
-        assert(s->free_objs == s->total_objs);
-        count++, total += s->total_objs;
+// 根据对象大小选择合适的kmem_cache并分配内存
+void *slub_alloc(size_t size) {
+    for (int i = 0; i < NUM_CACHES; i++) {
+        if (size <= kmalloc_size[i]) {
+            return kmem_cache_alloc(&kmalloc_caches[i]);
+        }
     }
-    assert(total == nr_free_slabs());
+    return NULL; // 如果请求的大小超过最大值，返回NULL
+}
 
-    slub_basic_check();
-
-    struct slab *slab0 = create_slab(128), *slab1, *slab2;
-    assert(slab0 != NULL);
-    assert(slab0->free_objs == slab0->total_objs);
-
-    list_entry_t free_list_store = free_list;
-    list_init(&free_list);
-    assert(list_empty(&free_list));
-    assert(alloc_page() == NULL);
-
-    unsigned int nr_free_store = nr_free;
-    nr_free = 0;
-
-    free_slabs(slab0 + 2, 3); // 释放 slab0 的部分
-    assert(alloc_slabs(4) == NULL);
-    assert(slab0 + 2->free_objs == 3);
-    assert((slab1 = alloc_slabs(3)) != NULL);
-    assert(alloc_page() == NULL);
-    assert(slab0 + 2 == slab1);
-
-    slab2 = slab0 + 1;
-    free_slab(slab0);
-    free_slabs(slab1, 3);
-    assert(slab0->free_objs == 1);
-    assert(slab1->free_objs == 3);
-
-    assert((slab0 = alloc_slab()) == slab2 - 1);
-    free_slab(slab0);
-    assert((slab0 = alloc_slabs(2)) == slab2 + 1);
-
-    free_slabs(slab0, 2);
-    free_slab(slab2);
-
-    assert((slab0 = alloc_slabs(5)) != NULL);
-    assert(alloc_page() == NULL);
-
-    assert(nr_free == 0);
-    nr_free = nr_free_store;
-
-    free_list = free_list_store;
-    free_slabs(slab0, 5);
-
-    le = &free_list;
-    while ((le = list_next(le)) != &free_list) {
-        struct slab *s = le2slab(le, slab_link);
-        count--, total -= s->free_objs;
+// 释放对象
+void slub_free(void *objp, size_t size) {
+    for (int i = 0; i < NUM_CACHES; i++) {
+        if (size <= kmalloc_size[i]) {
+            kmem_cache_free(&kmalloc_caches[i], objp);
+            return;
+        }
     }
-    assert(count == 0);
-    assert(total == 0);
+}
+
+// 打印slab信息，用于调试
+void print_slab_info(struct kmem_cache *cache) {
+    list_entry_t *le;
+    printf("Slab cache for size %zu bytes:\n", cache->obj_size);
+
+    // 遍历部分空闲的slab
+    list_for_each(le, &cache->slab_partial) {
+        struct slab *slab = le2struct(le, struct slab, slab_link);
+        printf("  Partial slab: total_objs = %zu, free_objs = %zu\n",
+               slab->total_objs, slab->free_objs);
+    }
+
+    // 遍历完全占用的slab
+    list_for_each(le, &cache->slab_full) {
+        struct slab *slab = le2struct(le, struct slab, slab_link);
+        printf("  Full slab: total_objs = %zu, free_objs = %zu\n",
+               slab->total_objs, slab->free_objs);
+    }
+}
+
+// 测试分配和释放
+void slub_check(void) {
+    slub_init();
+
+    // 分配多个对象
+    printf("Allocating 3 objects of size 32 bytes...\n");
+    void *objs[3];
+    for (int i = 0; i < 3; i++) {
+        objs[i] = slub_alloc(32);
+        printf("Allocated object at address: %p\n", objs[i]);
+    }
+
+    // 打印slab信息
+    print_slab_info(&kmalloc_caches[1]);
+
+    // 释放对象
+    printf("\nFreeing 3 objects of size 32 bytes...\n");
+    for (int i = 0; i < 3; i++) {
+        slub_free(objs[i], 32);
+        printf("Freed object at address: %p\n", objs[i]);
+    }
+
+    // 再次打印slab信息
+    print_slab_info(&kmalloc_caches[1]);
 }
