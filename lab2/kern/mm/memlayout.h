@@ -33,32 +33,32 @@ typedef uintptr_t pde_t;
  * that convert Page to other data types, such as physical address.
  * */
 struct Page {
-    int ref;                        // page frame's reference counter
-    uint64_t flags;                 // array of flags that describe the status of the page frame
-    unsigned int property;          // the num of free block, used in first fit pm manager
-    list_entry_t page_link;         // free list link
+    int ref;                        // 页框的引用计数
+    uint64_t flags;                 // 描述页框状态的标志位数组
+    unsigned int property;          // 空闲块的数量，用于首次适配的物理内存管理器
+    list_entry_t page_link;         // 空闲链表链接
 };
 
-/* Flags describing the status of a page frame */
-#define PG_reserved                 0       // if this bit=1: the Page is reserved for kernel, cannot be used in alloc/free_pages; otherwise, this bit=0 
-#define PG_property                 1       // if this bit=1: the Page is the head page of a free memory block(contains some continuous_addrress pages), and can be used in alloc_pages; if this bit=0: if the Page is the the head page of a free memory block, then this Page and the memory block is alloced. Or this Page isn't the head page.
+/* 描述页框状态的标志位 */
+#define PG_reserved                 0       // 如果该位为1：该页被保留用于内核，不能用于 alloc/free_pages；否则，该位为0 
+#define PG_property                 1       // 如果该位为1：该页是一个空闲内存块的头页（包含一些连续地址页），可以用于 alloc_pages；如果该位为0：如果该页是空闲内存块的头页，则该页和内存块已被分配；或者该页不是头页。
 
-#define SetPageReserved(page)       set_bit(PG_reserved, &((page)->flags))
-#define ClearPageReserved(page)     clear_bit(PG_reserved, &((page)->flags))
-#define PageReserved(page)          test_bit(PG_reserved, &((page)->flags))
-#define SetPageProperty(page)       set_bit(PG_property, &((page)->flags))
-#define ClearPageProperty(page)     clear_bit(PG_property, &((page)->flags))
-#define PageProperty(page)          test_bit(PG_property, &((page)->flags))
+#define SetPageReserved(page)       set_bit(PG_reserved, &((page)->flags))  // 设置页为保留状态
+#define ClearPageReserved(page)     clear_bit(PG_reserved, &((page)->flags)) // 清除页的保留状态
+#define PageReserved(page)          test_bit(PG_reserved, &((page)->flags))  // 测试页是否被保留
+#define SetPageProperty(page)       set_bit(PG_property, &((page)->flags))   // 设置页的属性
+#define ClearPageProperty(page)     clear_bit(PG_property, &((page)->flags)) // 清除页的属性
+#define PageProperty(page)          test_bit(PG_property, &((page)->flags))   // 测试页的属性
 
-// convert list entry to page
+// 将链表项转换为页
 #define le2page(le, member)                 \
-    to_struct((le), struct Page, member)
+    to_struct((le), struct Page, member)   // 将链表项转换为结构体 Page
 
-/* free_area_t - maintains a doubly linked list to record free (unused) pages */
+/* free_area_t - 维护一个双向链表以记录空闲（未使用）页 */
 typedef struct {
-    list_entry_t free_list;         // the list header
-    unsigned int nr_free;           // number of free pages in this free list
-} free_area_t;
+    list_entry_t free_list;         // 链表头
+    unsigned int nr_free;           // 空闲页的数量
+} free_area_t;                     // 空闲区域结构体
 
 #endif /* !__ASSEMBLER__ */
 
