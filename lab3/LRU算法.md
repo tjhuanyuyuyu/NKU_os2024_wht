@@ -13,7 +13,9 @@ LRU算法又名最近最少使用算法。在本质上该算法是根据在程�
 因此我们需要在Page结构体中添加成员变量Visited,表示该Page结构体距离上一次被访问经过了多少次访问。当某次访问的就是该页面时，该页面Visited值为0。
 
 **2.2 算法具体实现**
+
 **2.2.1 swap_manager_lru结构体**
+
 在规范化的工程设计中，接口的标准化极为重要。ucore提供了一个通用接口以适配不同的页面置换算法，使得更换算法时仅需改变对应的结构体指针即可实现替换。在 swap_lru.c 中，定义了 swap_manager_lru 接口并关联到具体的函数，实现了针对LRU页面置换算法的接口。
 代码如下：
 ```c++
@@ -30,6 +32,7 @@ struct swap_manager swap_manager_lru=
 };
 ```
 **2.2.2 _lru_init_mm()**
+
 在上述代码实现思路中，我们需要使用一个双向链表来管理内存中的物理页面，以便在需要替换页面时能够快速找到受访最少的页面。在 _lru_init_mm 函数中，我们初始化链表 pra_list_head，并将 mm->sm_priv 指向该链表的头部。这样，每个内存管理结构 mm_struct 便可通过 sm_priv 成员指向其关联的页面链表。
 ```c++
 static int _lru_init_mm(struct mm_struct *mm)
@@ -42,6 +45,7 @@ static int _lru_init_mm(struct mm_struct *mm)
 ```
 
 **2.2.3 _lru_check()**
+
 在上述代码实现的思路中，我们通过得到链表中Visited值最大的物理页面，从而得到应该换出去的页面。因此我们需要对Visited值进行准确及时的更新，在该函数中我们实现该功能。
 首先我们对双向链表进行遍历，对每个物理页面的页表项进行检查，如果该页面的页表项存在，并且PTE_A被设置，说明该页面最近被访问，其Visited值被设置为0；否则Visited值加1,表示距离上一次被访问时间又加1次。
 通过上述操作可以将现存的物理页面链表中Visited值进行更新,判断页面是否在被上次检查过以来被访问。
@@ -72,6 +76,7 @@ static int _lru_check(struct mm_struct *mm){
 ```
 
 **2.2.4 _lru_swap_out_victim()**
+
 在该函数中我们将寻找换出页面。在上述函数中我们初始化了页面队列，设置更新Visited数值的函数，因此我们可以进行寻找最久未使用的页面。
 首先我们需要更新Visited数值，确定自上次检查以来的访问情况，再遍历页面双向链表，由于链表节点是list_entry_t类型，因此需要我们进行类型转换，将其转换为Page类型，从而得到Visited值。
 注意，当链表为空时，我们返回-1,表明页面置换错误。
@@ -113,7 +118,9 @@ static int  _lru_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, 
 }
 ``` 
 **2.2.5 _lru_map_swappable()**
+
 在该函数中，我们完成对物理页面插入内存物理页面链表中的操作。为了综合提升Visited更新的频率，我们在这里依旧先更新Visited的值，再使用头插法将页面插入链表中，以便下一步操作；在这里我们将页面的Visited值初始化设置为0。
+
 ```c++
 static int _lru_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int swap_in)
 {
@@ -127,15 +134,21 @@ static int _lru_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page 
     return 0;
 }
 ```
+
 **2.2.6 函数调用接口**
+
 在swap_init()函数中将指向页面置换算法结构体的指针指向lru算法中的结构体，实现接口连接。
+
 ```c++
 sm = &swap_manager_lru;
 ```
 
 **2.3 一些小问题**
+
 关于_lru_check(mm);调用的频率问题。本质上我们应该定时对Visited数值进行更新，以确保未使用时间的准确性和精确性。例如在 *_lru_tick_event*函数中调用_lru_check(mm)，并且在外部调用函数，设置定时器，每隔一个时钟周期进行触发调用，确保Visited值的准确性。
 
+***
 #### 3、算法结果
+
 在终端make后，运行make grade，结果如下，表明正确。
 ![图片alt](lrumakegrade.png)
