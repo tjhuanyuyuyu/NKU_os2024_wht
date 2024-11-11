@@ -56,8 +56,7 @@ _lru_check(struct mm_struct *mm){
 }
 
 /*加入page，头插法  把需要的新的页面加入*/
-static int
-_lru_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int swap_in)
+static int _lru_map_swappable(struct mm_struct *mm, uintptr_t addr, struct Page *page, int swap_in)
 {
     _lru_check(mm);
     list_entry_t *head=(list_entry_t*) mm->sm_priv;
@@ -78,6 +77,10 @@ static int  _lru_swap_out_victim(struct mm_struct *mm, struct Page ** ptr_page, 
     assert(head != NULL);
     assert(in_tick==0);
    
+    if (list_empty(head)) {
+      return -1; 
+    }//避免链表为空  但是应该不会出现
+
     list_entry_t *curr_ptr=list_prev(head);
     list_entry_t *lru_ptr=curr_ptr;
     uint_t largest_visited=le2page(curr_ptr,pra_page_link)->visited;//得到最久没有使用的页面
@@ -181,7 +184,10 @@ _lru_set_unswappable(struct mm_struct *mm, uintptr_t addr)
 
 static int
 _lru_tick_event(struct mm_struct *mm)
-{ return 0; }
+{   
+   // _lru_check(mm);
+    return 0; 
+}
 
 
 struct swap_manager swap_manager_lru=
