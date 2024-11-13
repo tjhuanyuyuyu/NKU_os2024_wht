@@ -13,6 +13,7 @@
 #include <sbi.h>
 
 #define TICK_NUM 100
+volatile size_t num=0;
 
 static void print_ticks() {
     cprintf("%d ticks\n", TICK_NUM);
@@ -147,10 +148,14 @@ void interrupt_handler(struct trapframe *tf) {
             // In fact, Call sbi_set_timer will clear STIP, or you can clear it
             // directly.
             // clear_csr(sip, SIP_STIP);
-            clock_set_next_event();
-            if (++ticks % TICK_NUM == 0) {
+            clock_set_next_event();//(1)
+            if (++ticks % TICK_NUM == 0) {//(2+3)
                 print_ticks();
+                num=num+1;//(3)
             }
+           
+            if(num==10)
+                sbi_shutdown();//(4)
             break;
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");
@@ -187,10 +192,41 @@ void exception_handler(struct trapframe *tf) {
             cprintf("Instruction access fault\n");
             break;
         case CAUSE_ILLEGAL_INSTRUCTION:
-            cprintf("Illegal instruction\n");
+             // 非法指令异常处理
+             /* LAB1 CHALLENGE3   YOUR CODE :2212913  */
+            /*(1)输出指令异常类型（ Illegal instruction）
+             *(2)输出异常指令地址
+             *(3)更新 tf->epc寄存器
+            */
+            
+            cprintf("Exception type is Illegal instruction\n");
+            
+            cprintf("its address is: 0x%lx\n", tf->epc);
+
+            //cprintf("unusual address is:\n",tf->epc);
+            
+            tf->epc=tf->epc+4;
+            
+            
+     
+            
+            
             break;
         case CAUSE_BREAKPOINT:
-            cprintf("Breakpoint\n");
+            //断点异常处理
+            /* LAB1 CHALLLENGE3   YOUR CODE : 2212913 */
+            /*(1)输出指令异常类型（ breakpoint）
+             *(2)输出异常指令地址
+             *(3)更新 tf->epc寄存器
+            */
+            
+            cprintf("Exception type is breakpoint\n");
+            
+            cprintf("its address is:0x%lx\n",tf->epc);
+            
+            tf->epc=tf->epc+2;// EBREAK 指令在 RISC-V 中是一个 压缩指令（2 字节）
+       
+            
             break;
         case CAUSE_MISALIGNED_LOAD:
             cprintf("Load address misaligned\n");
