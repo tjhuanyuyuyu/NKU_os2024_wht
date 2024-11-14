@@ -1,33 +1,3 @@
-<style>
-body {
-    font-family: "SimSun", serif; /* 设置为宋体 */
-    font-size: 16px; /* 默认字体大小 */
-}
-h1 {
-    font-size: 24px; /* h1 字体大小 */
-    margin: 0; /* 去掉默认的 margin */
-    margin-bottom: 12px; /* 底部间距 */
-}
-h2 {
-    font-size: 22px; /* h2 字体大小 */
-    margin: 0; /* 去掉默认的 margin */
-    margin-bottom: 12px; /* 底部间距 */
-}
-h3 {
-    font-size: 20px; /* h2 字体大小 */
-    margin: 0; /* 去掉默认的 margin */
-    margin-bottom: 12px; /* 底部间距 */
-}
-h4 {
-    font-size: 18px; /* h2 字体大小 */
-    margin: 0; /* 去掉默认的 margin */
-    margin-bottom: 12px; /* 底部间距 */
-}
-p {
-    font-size: 16px; /* 段落字体大小 */
-}
-</style>
-
 <h1 align="center" style="border: none;"><strong>操作系统Lab3实验报告</strong></h1>
 
 <h2 align="center" style="border: none;">成员：涂佳欢语  王婷睿  胡可玉</h2>
