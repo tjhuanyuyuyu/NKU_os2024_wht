@@ -403,19 +403,13 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
             //to load the content of right disk page
             //into the memory which page managed.
             // (1) 根据 mm 和 addr，尝试将正确的磁盘页面内容加载到内存中
-            if (swap_in(mm, addr, &page) != 0) {
-                cprintf("swap_in failed for addr %x\n", addr);
-                goto failed;
-            }
+            swap_in(mm, addr, &page);
             //(2) According to the mm,
             //addr AND page, setup the
             //map of phy addr <--->
             //logical addr
             // (2) 根据 mm，addr 和 page，设置物理地址和逻辑地址的映射
-            if (page_insert(mm->pgdir, page, addr, perm) != 0) {
-                cprintf("page_insert failed for addr %x\n", addr);
-                goto failed;
-            }
+            page_insert(mm->pgdir, page, addr, perm); 
             //(3) make the page swappable.
             // (3) 将页面标记为可交换
             swap_map_swappable(mm,addr,page,1);
