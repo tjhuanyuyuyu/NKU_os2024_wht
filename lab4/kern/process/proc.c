@@ -287,10 +287,10 @@ copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
     proc->context.sp = (uintptr_t)(proc->tf);
 }
 
-/* do_fork -     parent process for a new child process
- * @clone_flags: used to guide how to clone the child process
- * @stack:       the parent's user stack pointer. if stack==0, It means to fork a kernel thread.
- * @tf:          the trapframe info, which will be copied to child process's proc->tf
+/* do_fork -     父进程为新子进程创建副本
+ * @clone_flags: 用于指导如何克隆子进程
+ * @stack:       父进程的用户栈指针。如果 stack == 0，表示要克隆一个内核线程。
+ * @tf:          trapframe 信息，将被复制到子进程的 proc->tf 中
  */
 int
 do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
@@ -302,37 +302,65 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     ret = -E_NO_MEM;
     //LAB4:EXERCISE2 YOUR CODE
     /*
-     * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
-     * MACROs or Functions:
-     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1)
-     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack
-     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags
-     *                 if clone_flags & CLONE_VM, then "share" ; else "duplicate"
-     *   copy_thread:  setup the trapframe on the  process's kernel stack top and
-     *                 setup the kernel entry point and stack of process
-     *   hash_proc:    add proc into proc hash_list
-     *   get_pid:      alloc a unique pid for process
-     *   wakeup_proc:  set proc->state = PROC_RUNNABLE
-     * VARIABLES:
-     *   proc_list:    the process set's list
-     *   nr_process:   the number of process set
+     * 一些有用的宏、函数和定义，您可以在下面的实现中使用它们。
+     * 宏或函数：
+     *   alloc_proc:   创建一个 proc 结构并初始化字段 (lab4:exercise1)
+     *   setup_kstack: 为进程分配大小为 KSTACKPAGE 的内核栈页面
+     *   copy_mm:      进程 "proc" 根据 clone_flags 复制或共享进程 "current" 的内存管理 (mm)
+     *                 如果 clone_flags & CLONE_VM，则 "共享"；否则 "复制"
+     *   copy_thread:  在进程的内核栈顶部设置 trapframe，并
+     *                 设置进程的内核入口点和栈
+     *   hash_proc:    将进程添加到 proc 哈希列表中
+     *   get_pid:      为进程分配一个唯一的 pid
+     *   wakeup_proc:  设置 proc->state = PROC_RUNNABLE
+     * 变量：
+     *   proc_list:    进程集合的列表
+     *   nr_process:   进程集合中的进程数量
      */
 
-    //    1. call alloc_proc to allocate a proc_struct
-    //    2. call setup_kstack to allocate a kernel stack for child process
-    //    3. call copy_mm to dup OR share mm according clone_flag
-    //    4. call copy_thread to setup tf & context in proc_struct
-    //    5. insert proc_struct into hash_list && proc_list
-    //    6. call wakeup_proc to make the new child process RUNNABLE
-    //    7. set ret vaule using child proc's pid
+    // 1. 调用 alloc_proc 分配一个 proc_struct
+    if ((proc = alloc_proc()) == NULL) 
+    {
+        goto fork_out;
+    }
+    // 2. 调用 setup_kstack 为子进程分配一个内核栈
+    if ((setup_kstack(proc)) == -E_NO_MEM)
+    {
+        goto bad_fork_cleanup_kstack;
+    }
+    // 3. 根据 clone_flag 调用 copy_mm 复制或共享 mm
+    if(copy_mm(clone_flags, proc)!=0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+    // 4. 调用 copy_thread 设置 proc_struct 中的 tf 和上下文
+    copy_thread(proc,stack,tf);
+    proc->parent = current;
 
-    
+    // 5. 将 proc_struct 插入到 hash_list 和 proc_list 中
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &(proc->list_link));
+        nr_process ++;
+    }
+    local_intr_restore(intr_flag);
+    // 6. 调用 wakeup_proc 使新子进程变为可运行状态 (RUNNABLE)
+    wakeup_proc(proc);
+    // 7. 使用子进程的 pid 设置返回值
+    ret = proc->pid; 
 
+
+// 函数的返回点
 fork_out:
     return ret;
 
+// 在分配内核栈失败时，释放已经分配的栈
 bad_fork_cleanup_kstack:
     put_kstack(proc);
+// 在进程分配失败时或其他错误发生时，释放已分配的进程结构体内存。    
 bad_fork_cleanup_proc:
     kfree(proc);
     goto fork_out;
