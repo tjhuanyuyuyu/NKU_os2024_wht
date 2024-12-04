@@ -116,6 +116,62 @@ struct proc_struct {
 
 #### 练习3：编写proc_run 函数（需要编码）
 
+proc_run用于将指定的进程切换到CPU上运行，它的大致执行步骤包括：
+
+1.检查要切换的进程是否与当前正在运行的进程相同，如果相同则不需要切换。
+
+2.禁用中断。
+
+3.切换当前进程为要运行的进程；切换页表，以便使用新进程的地址空间；切换上下文。
+
+4.允许中断。
+
+根据它的执行步骤，填写代码如下：
+
+```c++
+void
+proc_run(struct proc_struct *proc) {
+    if (proc != current) {  // 如果待运行的进程不是当前进程
+        bool intr_flag; // 保存是否启用中断
+        struct proc_struct *prev = current, *next = proc;
+        local_intr_save(intr_flag); // 禁用中断，确保操作的原子性
+        {
+            current = proc;
+            lcr3(proc->cr3); // 切换页表，以便使用新进程的地址空间
+            switch_to(&(prev->context), &(next->context)); // 实现上下文切换
+        }
+        local_intr_restore(intr_flag); // 启用中断
+       
+    }
+}
+```
+
+对实现代码进行说明：
+
+- `if (proc != current)` 检查目标进程 `proc` 是否与当前正在运行的进程（`current`）相同。如果相同，意味着当前进程已经在运行，不需要进行切换，所以可以直接返回。只有在目标进程与当前进程不同的情况下，才会执行接下来的操作。 `current` 表示当前正在执行的进程。
+
+- `bool intr_flag;` 声明一个 `bool` 类型的变量 `intr_flag`，用于保存当前中断的状态，在禁用中断之前先将当前的中断状态保存下来，以便稍后恢复，由于只有开、关两种情况，所以使用`bool` 类型。
+
+-  `struct proc_struct *prev = current, *next = proc;` 声明两个进程指针 `prev` 和 `next`，分别指向当前进程和目标进程。
+
+- 调用 `local_intr_save(intr_flag)` 宏来禁用中断并保存当前中断状态，保证进程切换操作的原子性。
+
+-  `current = proc;` 将当前进程切换为要运行的进程。
+
+- 调用 `lcr3(proc->cr3)` 来切换页表，cr3寄存器是x86架构的特殊寄存器，用来保存页表所在的基址， `proc->cr3` 是目标进程的页表基地址。
+
+-  `switch_to(&(prev->context), &(next->context));` 调用 `switch_to()` 函数，执行上下文切换， `prev->context` 和 `next->context` 分别是当前进程和要运行的进程的上下文。
+
+- 调用 `local_intr_restore(intr_flag)` 恢复中断状态。
+
+回答问题：在本实验的执行过程中，创建且运行了几个内核线程？
+
+在本实验中创建并运行了两个内核线程：第0个线程idleproc和第1个线程initproc。
+
+与本实验相关的部分运行结果截图：
+
+![部分运行结果](lab4.png)
+
 #### 扩展练习 Challenge
 
 - 说明语句local_intr_save(intr_flag);....local_intr_restore(intr_flag);是如何实现开关中断的？
