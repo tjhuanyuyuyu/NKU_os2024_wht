@@ -113,6 +113,200 @@ struct proc_struct {
 `context`通常与`trapframe`一起使用，以帮助操作系统管理和恢复进程状态。
 
 #### 练习2：为新创建的内核线程分配资源（需要编码）
+利用**kernel_thread**为线程的创建提供了一个接口，初始化了变量，设置了线程的上下文，但是**do_fork**是内核中负责实际创建新线程的函数，利用相关函数获得线程空间，内核栈等等。
+**2.1 代码实现**
+
+```c++
+int
+do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc;
+    if (nr_process >= MAX_PROCESS) {
+        goto fork_out;
+    }
+    ret = -E_NO_MEM;
+
+    // 1. 调用 alloc_proc 分配一个 proc_struct
+    if ((proc = alloc_proc()) == NULL) 
+    {
+        goto fork_out;
+    }
+    // 2. 调用 setup_kstack 为子进程分配一个内核栈
+    if ((setup_kstack(proc)) == -E_NO_MEM)
+    {
+        goto bad_fork_cleanup_kstack;
+    }
+    // 3. 根据 clone_flag 调用 copy_mm 复制或共享 mm
+    if(copy_mm(clone_flags, proc)!=0)
+    {
+        goto bad_fork_cleanup_proc;
+    }
+    // 4. 调用 copy_thread 设置 proc_struct 中的 tf 和上下文
+    copy_thread(proc,stack,tf);
+    proc->parent = current;
+
+    // 5. 将 proc_struct 插入到 hash_list 和 proc_list 中
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &(proc->list_link));
+        nr_process ++;
+    }
+    local_intr_restore(intr_flag);
+    // 6. 调用 wakeup_proc 使新子进程变为可运行状态 (RUNNABLE)
+    wakeup_proc(proc);
+    // 7. 使用子进程的 pid 设置返回值
+    ret = proc->pid; 
+
+
+// 函数的返回点
+fork_out:
+    return ret;
+// 在分配内核栈失败时，释放已经分配的栈
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+// 在进程分配失败时或其他错误发生时，释放已分配的进程结构体内存。    
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+}
+```
+
+1. 首先调用的**alloc_proc()**来为一个新进程或内核线程分配内存并初始化相关字段。如果分配失败（返回 NULL），就跳转到fork_out 进行清理。
+2. 调用**setup_kstack()函数**为子进程分配内核栈.在函数中又调用了**alloc_pages（）函数**为进程分配KSTACKPAGE（2）个物理页面，分配完成将分配的物理地址转换为虚拟地址赋值进程的kstack成员（用于记录内核栈的位置）。
+```c++
+// setup_kstack - 为进程分配大小为 KSTACKPAGE 的内核栈页面
+static int
+setup_kstack(struct proc_struct *proc) {
+    // 分配大小为 KSTACKPAGE 的内存页
+    struct Page *page = alloc_pages(KSTACKPAGE);  
+
+    if (page != NULL) {
+        // 将内存页的物理地址转换为内核虚拟地址并存储到 proc->kstack
+        proc->kstack = (uintptr_t)page2kva(page);
+        return 0;
+    }
+    return -E_NO_MEM;
+}
+```
+3. 通过**copy_mm()**复制或共享父进程的内存管理信息。但在本次实验中copy_mm()什么都不做，之后的实验中会实现。在本次使用中创建第一个内核线程（initproc）采用的是共享。
+```c++
+static int
+copy_mm(uint32_t clone_flags, struct proc_struct *proc) {
+    assert(current->mm == NULL);
+    /* do nothing in this project */
+    return 0;
+}
+```
+4. 调用**copy_thread()**来为进程设置上下文（tf和context）。再将本进程的父节点设置为目前在运行的进程，构建出一个进程树来进行管理和调度进程。
+```c++
+static void
+copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
+    // 设置进程的 trapframe 指针，指向进程内核栈顶部，留出 trapframe 的空间
+    proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE - sizeof(struct trapframe));
+    // 将传入的 tf（父进程或线程的状态信息） 数据拷贝到进程的 trapframe 中
+    *(proc->tf) = *tf;
+
+    // 将 a0 寄存器设置为 0，说明这个进程是一个子进程
+    proc->tf->gpr.a0 = 0;
+    // 设置子进程的栈指针 (sp)
+    // 如果 esp 为 0，则将 sp 设置为 trapframe 的地址，表示从内核栈顶部开始；否则使用传入的 esp 值
+    proc->tf->gpr.sp = (esp == 0) ? (uintptr_t)proc->tf : esp;
+
+    // 设置返回地址寄存器 (ra)，当内核线程从内核模式返回时会跳转到 forkret
+    proc->context.ra = (uintptr_t)forkret;
+    // 设置内核上下文中的栈指针 (sp)，指向 trapframe 的地址
+    proc->context.sp = (uintptr_t)(proc->tf);
+}
+```
+5. 将进程插入到hash和proc的链表中，在插入前禁用中断，结束后再恢复中断。
+```c++
+bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &(proc->list_link));
+        nr_process ++;
+    }
+    local_intr_restore(intr_flag);
+```
+  1. **local_intr_save()函数**用于保存当前的中断状态，**local_intr_restore（）函数**用于恢复中断状态。  
+  2. **get_pid（）**函数给该进程分配唯一的id
+    ```c++
+    static int
+    get_pid(void) {
+        static_assert(MAX_PID > MAX_PROCESS);
+        struct proc_struct *proc;
+        list_entry_t *list = &proc_list, *le;  //list 指向进程链表的头部（proc_list），le 用于遍历链表中的每个元素
+        static int next_safe = MAX_PID, last_pid = MAX_PID;
+        //next_safe：表示下一个可用的安全 PID  last_pid：上次分配的 PID
+        //如果超出 MAX_PID，重新从 1 开始分配
+        if (++ last_pid >= MAX_PID) {
+            last_pid = 1;
+            goto inside;
+        }
+        //当前 PID 超出或达到 next_safe，可能存在冲突
+        if (last_pid >= next_safe) {
+        inside:
+            next_safe = MAX_PID;
+        repeat:
+            le = list;
+            //逐一检查进程块编号
+            while ((le = list_next(le)) != list) {
+                proc = le2proc(le, list_link);
+                // 当前 last_pid 已被占用
+                if (proc->pid == last_pid) {
+                    //递增后超出next_safe 或 MAX_PID，重新循环查找
+                    if (++ last_pid >= next_safe) {
+                        if (last_pid >= MAX_PID) {
+                            last_pid = 1;
+                        }
+                        next_safe = MAX_PID;
+                        goto repeat;
+                    }
+                }
+                //更新 next_safe 为最小的占用 PID，避免分配冲突
+                else if (proc->pid > last_pid && next_safe > proc->pid) {
+                    next_safe = proc->pid;
+                }
+            }
+        }
+        return last_pid;
+    }
+
+    ```
+   3. **hash_proc（）**函数是将pid进行hash运算后，得到pid所在桶的位置，将该进程或者线程的hash_link，加入到该桶的位置。
+    ```c++
+    static void
+    hash_proc(struct proc_struct *proc) {
+        list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
+    }
+    ```
+    4. 再将本进程加入到进程链表链接中，最后给当前的进程数加1
+
+6. 之后将设置好的进程设置为可运行状态，返回pid的值。
+7. 函数的最后还写了出错的解决方案：
+```c++  
+// 函数的返回点
+fork_out:
+    return ret;
+// 在分配内核栈失败时，释放已经分配的栈
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+// 在进程分配失败时或其他错误发生时，释放已分配的进程结构体内存。    
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+```
+
+**2.2 回答问题**
+问：请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由
+答：可以。因为在`do_fork函数`中，我们就调用了`get_pid函数`为该线程或者进程分配了唯一的pid，而且在`proc.h`中也定义了`MAX_PID=MAX_PROCESS * 2`，有足够大小的pid来分配。
+
+
 
 #### 练习3：编写proc_run 函数（需要编码）
 
