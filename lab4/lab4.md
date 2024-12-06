@@ -115,7 +115,6 @@ struct proc_struct {
 #### 练习2：为新创建的内核线程分配资源（需要编码）
 利用**kernel_thread**为线程的创建提供了一个接口，初始化了变量，设置了线程的上下文，但是**do_fork**是内核中负责实际创建新线程的函数，利用相关函数获得线程空间，内核栈等等。
 **2.1 代码实现**
-
 ```c++
 int
 do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
@@ -233,8 +232,8 @@ bool intr_flag;
     }
     local_intr_restore(intr_flag);
 ```
-  1. **local_intr_save()函数**用于保存当前的中断状态，**local_intr_restore（）函数**用于恢复中断状态。  
-  2. **get_pid（）**函数给该进程分配唯一的id
+- **local_intr_save()函数**用于保存当前的中断状态，**local_intr_restore（）函数**用于恢复中断状态。  
+- get_pid()函数给该进程分配唯一的id
 ```c++
 static int
 get_pid(void) {
@@ -277,15 +276,14 @@ get_pid(void) {
     return last_pid;
 }
 ```
-   3. **hash_proc（）**函数是将pid进行hash运算后，得到pid所在桶的位置，将该进程或者线程的hash_link，加入到该桶的位置。
+- hash_proc（）函数是将pid进行hash运算后，得到pid所在桶的位置，将该进程或者线程的hash_link，加入到该桶的位置。
 ```c++
 static void
 hash_proc(struct proc_struct *proc) {
     list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
 }
 ```
-
-    4. 再将本进程加入到进程链表链接中，最后给当前的进程数加1
+- 再将本进程加入到进程链表链接中，最后给当前的进程数加1
 
 6. 之后将设置好的进程设置为可运行状态，返回pid的值。
 7. 函数的最后还写了出错的解决方案：
@@ -370,4 +368,26 @@ proc_run(struct proc_struct *proc) {
 #### 扩展练习 Challenge
 
 - 说明语句local_intr_save(intr_flag);....local_intr_restore(intr_flag);是如何实现开关中断的？
+- `local_intr_save(intr_flag)`和`local_intr_restore(intr_flag)`是在`sync.h`里定义的两个用来在局部范围内保存和恢复中断状态的函数。在函数的实现中，又分别调用了`__intr_save`和`__intr_restore`两个内联函数。`local_intr_save(intr_flag)`得到__intr_save（）的返回值，如果返回值为1，表示需要恢复中断；如果中断已禁用，返回值会为 0，表示无需恢复中断。`local_intr_restore(intr_flag)`调用__intr_restore()，传入 x 参数，恢复中断状态。如果 x 为 1，则恢复中断；如果 x 为 0，则不做任何操作。
+  ```c++
+  static inline bool __intr_save(void) {
+    if (read_csr(sstatus) & SSTATUS_SIE) //检查当前的SIE位，
+    {
+        //如果启用了全局中断（SIE为1），禁用中断并返回 1；否则返回 0。
+        intr_disable();
+        return 1;
+    }
+    return 0;
+}
+  ```
+
+```c++
+static inline void __intr_restore(bool flag) {
+    if (flag)   //根据传入的flag恢复中断状态
+    {
+        // 如果 flag 为 1，说明之前中断已被禁用，因此需要重新启用中断
+        intr_enable();
+    }
+}
+```
 
