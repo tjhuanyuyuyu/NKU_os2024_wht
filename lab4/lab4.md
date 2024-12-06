@@ -379,7 +379,7 @@ proc_run(struct proc_struct *proc) {
     }
     return 0;
 }
-  ```
+```
 
 ```c++
 static inline void __intr_restore(bool flag) {
