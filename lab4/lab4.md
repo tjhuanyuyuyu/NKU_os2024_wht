@@ -369,15 +369,15 @@ proc_run(struct proc_struct *proc) {
 
 - 说明语句local_intr_save(intr_flag);....local_intr_restore(intr_flag);是如何实现开关中断的？
 - `local_intr_save(intr_flag)`和`local_intr_restore(intr_flag)`是在`sync.h`里定义的两个用来在局部范围内保存和恢复中断状态的函数。在函数的实现中，又分别调用了`__intr_save`和`__intr_restore`两个内联函数。`local_intr_save(intr_flag)`得到__intr_save（）的返回值，如果返回值为1，表示需要恢复中断；如果中断已禁用，返回值会为 0，表示无需恢复中断。`local_intr_restore(intr_flag)`调用__intr_restore()，传入 x 参数，恢复中断状态。如果 x 为 1，则恢复中断；如果 x 为 0，则不做任何操作。
-  ```c++
-  static inline bool __intr_save(void) {
-    if (read_csr(sstatus) & SSTATUS_SIE) //检查当前的SIE位，
-    {
-        //如果启用了全局中断（SIE为1），禁用中断并返回 1；否则返回 0。
-        intr_disable();
-        return 1;
-    }
-    return 0;
+```c++
+static inline bool __intr_save(void) {
+if (read_csr(sstatus) & SSTATUS_SIE) //检查当前的SIE位，
+{
+    //如果启用了全局中断（SIE为1），禁用中断并返回 1；否则返回 0。
+    intr_disable();
+    return 1;
+}
+return 0;
 }
 ```
 
