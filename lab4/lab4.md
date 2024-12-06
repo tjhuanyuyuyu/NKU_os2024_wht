@@ -303,7 +303,7 @@ bad_fork_cleanup_proc:
 **2.2 回答问题**  
 
 问：请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由
-答：可以。因为在`do_fork函数`中，我们就调用了`get_pid函数`为该线程或者进程分配了唯一的pid，而且在`proc.h`中也定义了`MAX_PID=MAX_PROCESS * 2`，有足够大小的pid来分配。
+答：可以。因为在`do_fork函数`中，我们就调用了`get_pid函数`为该线程或者进程分配了唯一的pid，而且在`proc.h`中也定义了`MAX_PID=MAX_PROCESS * 2`，有足够大小的pid来分配。每个fork的线程拥有唯一的pid，操作系统可以用pid来辨识每一个线程，有利于管理。
 
 
 
