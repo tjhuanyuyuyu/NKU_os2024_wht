@@ -235,56 +235,55 @@ bool intr_flag;
 ```
   1. **local_intr_save()函数**用于保存当前的中断状态，**local_intr_restore（）函数**用于恢复中断状态。  
   2. **get_pid（）**函数给该进程分配唯一的id
-    ```c++
-    static int
-    get_pid(void) {
-        static_assert(MAX_PID > MAX_PROCESS);
-        struct proc_struct *proc;
-        list_entry_t *list = &proc_list, *le;  //list 指向进程链表的头部（proc_list），le 用于遍历链表中的每个元素
-        static int next_safe = MAX_PID, last_pid = MAX_PID;
-        //next_safe：表示下一个可用的安全 PID  last_pid：上次分配的 PID
-        //如果超出 MAX_PID，重新从 1 开始分配
-        if (++ last_pid >= MAX_PID) {
-            last_pid = 1;
-            goto inside;
-        }
-        //当前 PID 超出或达到 next_safe，可能存在冲突
-        if (last_pid >= next_safe) {
-        inside:
-            next_safe = MAX_PID;
-        repeat:
-            le = list;
-            //逐一检查进程块编号
-            while ((le = list_next(le)) != list) {
-                proc = le2proc(le, list_link);
-                // 当前 last_pid 已被占用
-                if (proc->pid == last_pid) {
-                    //递增后超出next_safe 或 MAX_PID，重新循环查找
-                    if (++ last_pid >= next_safe) {
-                        if (last_pid >= MAX_PID) {
-                            last_pid = 1;
-                        }
-                        next_safe = MAX_PID;
-                        goto repeat;
+```c++
+static int
+get_pid(void) {
+    static_assert(MAX_PID > MAX_PROCESS);
+    struct proc_struct *proc;
+    list_entry_t *list = &proc_list, *le;  //list 指向进程链表的头部（proc_list），le 用于遍历链表中的每个元素
+    static int next_safe = MAX_PID, last_pid = MAX_PID;
+    //next_safe：表示下一个可用的安全 PID  last_pid：上次分配的 PID
+    //如果超出 MAX_PID，重新从 1 开始分配
+    if (++ last_pid >= MAX_PID) {
+        last_pid = 1;
+        goto inside;
+    }
+    //当前 PID 超出或达到 next_safe，可能存在冲突
+    if (last_pid >= next_safe) {
+    inside:
+        next_safe = MAX_PID;
+    repeat:
+        le = list;
+        //逐一检查进程块编号
+        while ((le = list_next(le)) != list) {
+            proc = le2proc(le, list_link);
+            // 当前 last_pid 已被占用
+            if (proc->pid == last_pid) {
+                //递增后超出next_safe 或 MAX_PID，重新循环查找
+                if (++ last_pid >= next_safe) {
+                    if (last_pid >= MAX_PID) {
+                        last_pid = 1;
                     }
-                }
-                //更新 next_safe 为最小的占用 PID，避免分配冲突
-                else if (proc->pid > last_pid && next_safe > proc->pid) {
-                    next_safe = proc->pid;
+                    next_safe = MAX_PID;
+                    goto repeat;
                 }
             }
+            //更新 next_safe 为最小的占用 PID，避免分配冲突
+            else if (proc->pid > last_pid && next_safe > proc->pid) {
+                next_safe = proc->pid;
+            }
         }
-        return last_pid;
     }
-
-    ```
+    return last_pid;
+}
+```
    3. **hash_proc（）**函数是将pid进行hash运算后，得到pid所在桶的位置，将该进程或者线程的hash_link，加入到该桶的位置。
-    ```c++
-    static void
-    hash_proc(struct proc_struct *proc) {
-        list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
-    }
-    ```
+```c++
+static void
+hash_proc(struct proc_struct *proc) {
+    list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
+}
+```
     4. 再将本进程加入到进程链表链接中，最后给当前的进程数加1
 
 6. 之后将设置好的进程设置为可运行状态，返回pid的值。
