@@ -284,6 +284,7 @@ hash_proc(struct proc_struct *proc) {
     list_add(hash_list + pid_hashfn(proc->pid), &(proc->hash_link));
 }
 ```
+
     4. 再将本进程加入到进程链表链接中，最后给当前的进程数加1
 
 6. 之后将设置好的进程设置为可运行状态，返回pid的值。
@@ -301,7 +302,8 @@ bad_fork_cleanup_proc:
     goto fork_out;
 ```
 
-**2.2 回答问题**
+**2.2 回答问题**  
+
 问：请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由
 答：可以。因为在`do_fork函数`中，我们就调用了`get_pid函数`为该线程或者进程分配了唯一的pid，而且在`proc.h`中也定义了`MAX_PID=MAX_PROCESS * 2`，有足够大小的pid来分配。
 
