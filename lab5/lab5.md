@@ -70,7 +70,7 @@ tf->status = sstatus & ~(SSTATUS_SPP | SSTATUS_SPIE);
 - 在 **CAUSE_BREAKPOINT** 处调用 **syscall**，此后操作是为用户程序准备环境，加载代码和数据等;
 - 在 **syscall** 中根据传入参数，执行 **sys_exec**，调用 **do_execve**;
 - 在 **do_execve** 中调用 **load_icode**，加载文件;
-- 当用户程序加载完成后一路返回，直到**__alltraps**的末尾，接着执行 **__trapret** 后的内容，到 **sret**，表示退出S态，回到用户态执行，这时开始执行用户的应用程序;
+- 当用户程序加载完成后一路返回，直到 **__alltraps** 的末尾，接着执行 **__trapret** 后的内容，到 **sret**，表示退出S态，回到用户态执行，这时开始执行用户的应用程序;
 
 根据上述操作，进程返回用户态并开始执行用户程序的第一条指令。此时控制流从user_main跳到了用户程序的入口点。user_main完成启动用户程序并切换到内核态加载程序的任务。
 
