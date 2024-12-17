@@ -76,7 +76,87 @@ tf->status = sstatus & ~(SSTATUS_SPP | SSTATUS_SPIE);
 
 #### 练习2: 父进程复制自己的内存空间给子进程（需要编码）
 
-***
+ `copy_range` 函数的作用是将一个内存范围的内容从一个进程的页表（`from`）复制到另一个进程的页表（`to`），并且支持是否共享页的选项。
+
+**参数解析**：
+- `pde_t *to`：目标进程的页目录表。
+- `pde_t *from`：源进程的页目录表。
+- `uintptr_t start`：复制开始的虚拟地址。
+- `uintptr_t end`：复制结束的虚拟地址。
+- `bool share`：是否共享页，影响页表映射的方式。
+
+### 主要步骤解析：
+1. **验证参数**
+   ```c
+   assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+   assert(USER_ACCESS(start, end));
+   ```
+   - `start` 和 `end` 必须是页面大小（`PGSIZE`）的整数倍，确保地址对齐。
+   - `USER_ACCESS(start, end)` 检查指定的虚拟地址范围是否在用户可访问的范围内。
+
+2. **复制内容（按页面单位）**
+   ```c
+   do {
+       // 获取源进程指定地址的页表项
+       pte_t *ptep = get_pte(from, start, 0), *nptep;
+       if (ptep == NULL) {
+           start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+           continue;
+       }
+   ```
+   - 使用 `get_pte` 获取源进程在 `start` 地址的页表项（`ptep`）。如果页表项为空，表示该页没有映射，`start` 地址向上调整到下一个页目录项，并继续处理下一个地址范围。
+
+3. **检查页表项的有效性**
+   ```c
+   if (*ptep & PTE_V) {
+       if ((nptep = get_pte(to, start, 1)) == NULL) {
+           return -E_NO_MEM;
+       }
+   ```
+   - 如果页表项有效（`PTE_V` 表示该页有效），则获取目标进程的页表项 `nptep`，并确保如果目标页表项为空，则分配一个新的页表项。如果无法分配内存（`get_pte` 返回 `NULL`），则返回 `-E_NO_MEM` 错误。
+
+4. **获取源页和目标页**
+   ```c
+   uint32_t perm = (*ptep & PTE_USER);
+   struct Page *page = pte2page(*ptep);  // 源进程的物理页面
+   struct Page *npage = alloc_page();    // 为目标进程分配一个新页面
+   assert(page != NULL);
+   assert(npage != NULL);
+   ```
+   - 提取源进程的页面权限（`PTE_USER`）并从源进程的页表项中获取物理页面（`page`）。
+   - 为目标进程分配一个新的页面（`npage`）用于存放复制的内容。
+
+5. **复制内存内容并建立页表映射**
+   这里需要执行以下任务：
+   - 从源页面复制内容到目标页面。
+   - 建立目标进程的页表映射。
+
+   ```c
+   int ret = 0;
+   // (1) 获取源页面的内核虚拟地址
+   void *src_kvaddr = page2kva(page);
+   // (2) 获取目标页面的内核虚拟地址
+   void *dst_kvaddr = page2kva(npage);
+   // (3) 进行内存拷贝，拷贝大小为 PGSIZE
+   memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+   // (4) 将目标页面映射到目标虚拟地址
+   ret = page_insert(to, npage, start, perm | PTE_V);
+   assert(ret == 0);
+   ```
+   - `(1)` 获取源页面的内核虚拟地址，通过 `page2kva(page)`。
+   - `(2)` 获取目标页面的内核虚拟地址，通过 `page2kva(npage)`。
+   - `(3)` 使用 `memcpy` 将源页面的内容复制到目标页面，复制的大小为 `PGSIZE`。
+   - `(4)` 使用 `page_insert` 将目标页面（`npage`）映射到目标进程的虚拟地址 `start`，并设置权限为原页面的权限（`perm`）加上有效标志 `PTE_V`。
+
+6. **调整地址并继续复制**
+   ```c
+   start += PGSIZE;
+   } while (start != 0 && start < end);
+   return 0;
+   ```
+   - 每次处理完一个页面后，将 `start` 地址增加 `PGSIZE`，继续处理下一个页面，直到整个地址范围被处理完毕。
+
+
 
 #### 练习3: 阅读分析源代码，理解进程执行 fork/exec/wait/exit 的实现，以及系统调用的实现（不需要编码）
 

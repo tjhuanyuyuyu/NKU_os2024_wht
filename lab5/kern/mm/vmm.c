@@ -448,7 +448,6 @@ do_pgfault(struct mm_struct *mm, uint_t error_code, uintptr_t addr) {
         *    swap_map_swappable ： 设置页面可交换
         */
         if (swap_init_ok) {
-            struct Page *page = NULL;
             // 你要编写的内容在这里，请基于上文说明以及下文的英文注释完成代码编写
             //(1）According to the mm AND addr, try
             //to load the content of right disk page
@@ -473,40 +472,30 @@ failed:
     return ret;
 }
 
-//用于检查某一内存区域是否符合当前进程的内存访问权限
 bool
 user_mem_check(struct mm_struct *mm, uintptr_t addr, size_t len, bool write) {
-    if (mm != NULL) {//如果 mm 为空，则说明是内核访问，进入内核内存检查逻辑
+    if (mm != NULL) {
         if (!USER_ACCESS(addr, addr + len)) {
             return 0;
-            //判断地址范围 [addr, addr + len) 是否在用户进程的可访问内存范围内。
-            //如果不在有效范围内，返回 0 表示不合法。
         }
         struct vma_struct *vma;
         uintptr_t start = addr, end = addr + len;
         while (start < end) {
             if ((vma = find_vma(mm, start)) == NULL || start < vma->vm_start) {
-                return 0;//说明访问越界，返回 0
+                return 0;
             }
             if (!(vma->vm_flags & ((write) ? VM_WRITE : VM_READ))) {
                 return 0;
-                //根据 write 参数，检查该 VMA 是否具备所需的权限：
-                //如果 write 为 true，则检查 VMA 是否具有写权限（VM_WRITE）。
-                //如果 write 为 false，则检查 VMA 是否具有读权限（VM_READ）。
-                //如果没有权限，则返回 0，表示该内存区域不可访问。
             }
             if (write && (vma->vm_flags & VM_STACK)) {
-                //当执行写操作时，如果访问的内存区域位于栈的顶部（即栈的起始地址附近），则需要额外检查是否越界。
                 if (start < vma->vm_start + PGSIZE) { //check stack start & size
                     return 0;
                 }
             }
             start = vma->vm_end;
-            //更新 start 地址为当前 VMA 的结束地址，继续检查下一个内存区域。
         }
         return 1;
     }
     return KERN_ACCESS(addr, addr + len);
-    //如果 mm 为 NULL，则说明这是内核内存的访问，调用 KERN_ACCESS 进行内核内存的合法性检查。
 }
 

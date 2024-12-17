@@ -46,18 +46,17 @@ older sibling:    proc->optr    (proc is younger sibling)
 younger sibling:  proc->yptr    (proc is older sibling)
 -----------------------------
 related syscall for process:
+SYS_exit        : process exit,                           -->do_exit
+SYS_fork        : create child process, dup mm            -->do_fork-->wakeup_proc
+SYS_wait        : wait process                            -->do_wait
+SYS_exec        : after fork, process execute a program   -->load a program and refresh the mm
+SYS_clone       : create child thread                     -->do_fork-->wakeup_proc
+SYS_yield       : process flag itself need resecheduling, -- proc->need_sched=1, then scheduler will rescheule this process
+SYS_sleep       : process sleep                           -->do_sleep 
+SYS_kill        : kill process                            -->do_kill-->proc->flags |= PF_EXITING
+                                                                 -->wakeup_proc-->do_wait-->do_exit   
+SYS_getpid      : get the process's pid
 
-uCore 提供了几个重要的系统调用来管理进程：
-
-SYS_exit：进程退出。调用 do_exit 使进程进入 PROC_ZOMBIE 状态。
-SYS_fork：创建子进程。通过 do_fork 创建子进程，并调用 wakeup_proc 唤醒子进程，使其进入可运行状态。
-SYS_wait：等待子进程退出。父进程调用 do_wait 等待子进程的退出，并回收资源。
-SYS_exec：执行新的程序。通过加载新的程序映像并更新进程的内存管理结构，替换当前进程的执行内容。
-SYS_clone：创建线程。通过 do_fork 创建线程，线程与进程共享内存空间，因此也需要调用 wakeup_proc 唤醒新线程。
-SYS_yield：主动放弃 CPU 使用权。通过设置 proc->need_sched = 1，表明当前进程需要重新调度。
-SYS_sleep：使进程进入睡眠状态。调用 do_sleep 后，进程进入 PROC_SLEEPING 状态。
-SYS_kill：终止进程。通过 do_kill 设置进程的退出标志，调用 wakeup_proc 唤醒进程，最终进入 do_exit。
-SYS_getpid：获取进程的 PID。通过此系统调用，进程可以查询自己当前的进程 ID。
 */
 
 // the process set's list
@@ -104,7 +103,7 @@ alloc_proc(void) {
      *       uint32_t flags;                             // Process flag
      *       char name[PROC_NAME_LEN + 1];               // Process name
      */
-        proc->state=PROC_UNINIT;    //设置进程为“初始”态
+     proc->state=PROC_UNINIT;    //设置进程为“初始”态
         proc->pid=-1;               //设置进程pid的未初始化值
         proc->runs=0;
         proc->kstack=0;
@@ -119,18 +118,16 @@ alloc_proc(void) {
                                 // 故采用为uCore内核已经建立的页表，即uCore内核页表的起始地址boot_cr3
         proc->flags=0;
         memset(proc->name,0,PROC_NAME_LEN);//保留一个char存放'\0'
-
      //LAB5 YOUR CODE : (update LAB4 steps)
      /*
      * below fields(add in LAB5) in proc_struct need to be initialized  
      *       uint32_t wait_state;                        // waiting state
      *       struct proc_struct *cptr, *yptr, *optr;     // relations between processes
      */
-        proc->wait_state=0;
+     proc->wait_state=0;
         proc->cptr=NULL;
         proc->yptr=NULL;
         proc->optr=NULL;
-        
     }
     return proc;
 }
@@ -213,17 +210,19 @@ get_pid(void) {
     return last_pid;
 }
 
+// proc_run - make process "proc" running on cpu
+// NOTE: before call switch_to, should load  base addr of "proc"'s new PDT
 void
 proc_run(struct proc_struct *proc) {
-    if (proc != current) {  // 如果待运行的进程不是当前进程
-        // LAB4:EXERCISE3 YOUR 2213235
+    if (proc != current) {
+        // LAB4:EXERCISE3 YOUR CODE
         /*
         * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
         * MACROs or Functions:
-        *   local_intr_save():        Disable interrupts 禁用中断
-        *   local_intr_restore():     Enable Interrupts 启用中断
-        *   lcr3():                   Modify the value of CR3 register 修改CR3寄存器的值
-        *   switch_to():              Context switching between two processes 在两个进程之间进行上下文切换
+        *   local_intr_save():        Disable interrupts
+        *   local_intr_restore():     Enable Interrupts
+        *   lcr3():                   Modify the value of CR3 register
+        *   switch_to():              Context switching between two processes
         */
         bool intr_flag; // 保存是否启用中断
         struct proc_struct *prev = current, *next = proc;
@@ -234,10 +233,8 @@ proc_run(struct proc_struct *proc) {
             switch_to(&(prev->context), &(next->context)); // 实现上下文切换
         }
         local_intr_restore(intr_flag); // 启用中断
-       
     }
 }
-
 
 // forkret -- the first kernel entry point of a new thread/process
 // NOTE: the addr of forkret is setted in copy_thread function
@@ -400,66 +397,71 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
     ret = -E_NO_MEM;
     //LAB4:EXERCISE2 YOUR CODE
     /*
-     * 一些有用的宏、函数和定义，您可以在下面的实现中使用它们。
-     * 宏或函数：
-     *   alloc_proc:   创建一个 proc 结构并初始化字段 (lab4:exercise1)
-     *   setup_kstack: 为进程分配大小为 KSTACKPAGE 的内核栈页面
-     *   copy_mm:      进程 "proc" 根据 clone_flags 复制或共享进程 "current" 的内存管理 (mm)
-     *                 如果 clone_flags & CLONE_VM，则 "共享"；否则 "复制"
-     *   copy_thread:  在进程的内核栈顶部设置 trapframe，并
-     *                 设置进程的内核入口点和栈
-     *   hash_proc:    将进程添加到 proc 哈希列表中
-     *   get_pid:      为进程分配一个唯一的 pid
-     *   wakeup_proc:  设置 proc->state = PROC_RUNNABLE
-     * 变量：
-     *   proc_list:    进程集合的列表
-     *   nr_process:   进程集合中的进程数量
+     * Some Useful MACROs, Functions and DEFINEs, you can use them in below implementation.
+     * MACROs or Functions:
+     *   alloc_proc:   create a proc struct and init fields (lab4:exercise1)
+     *   setup_kstack: alloc pages with size KSTACKPAGE as process kernel stack
+     *   copy_mm:      process "proc" duplicate OR share process "current"'s mm according clone_flags
+     *                 if clone_flags & CLONE_VM, then "share" ; else "duplicate"
+     *   copy_thread:  setup the trapframe on the  process's kernel stack top and
+     *                 setup the kernel entry point and stack of process
+     *   hash_proc:    add proc into proc hash_list
+     *   get_pid:      alloc a unique pid for process
+     *   wakeup_proc:  set proc->state = PROC_RUNNABLE
+     * VARIABLES:
+     *   proc_list:    the process set's list
+     *   nr_process:   the number of process set
      */
+     
 
-    // 1. 调用 alloc_proc 分配一个 proc_struct
-    if ((proc = alloc_proc()) == NULL) 
-    {
+    //    1. call alloc_proc to allocate a proc_struct
+    //    2. call setup_kstack to allocate a kernel stack for child process
+    //    3. call copy_mm to dup OR share mm according clone_flag
+    //    4. call copy_thread to setup tf & context in proc_struct
+    //    5. insert proc_struct into hash_list && proc_list
+    //    6. call wakeup_proc to make the new child process RUNNABLE
+    //    7. set ret vaule using child proc's pid
+    
+
+    //LAB5 YOUR CODE : (update LAB4 steps)
+    //TIPS: you should modify your written code in lab4(step1 and step5), not add more code.
+   /* Some Functions
+    *    set_links:  set the relation links of process.  ALSO SEE: remove_links:  lean the relation links of process 
+    *    -------------------
+    *    update step 1: set child proc's parent to current process, make sure current process's wait_state is 0
+    *    update step 5: insert proc_struct into hash_list && proc_list, set the relation links of process
+    */
+    if((proc = alloc_proc()) == NULL) {
         goto fork_out;
     }
-    // 2. 调用 setup_kstack 为子进程分配一个内核栈
-    if ((setup_kstack(proc)) == -E_NO_MEM)
-    {
-        goto bad_fork_cleanup_kstack;
-    }
-    // 3. 根据 clone_flag 调用 copy_mm 复制或共享 mm
-    if(copy_mm(clone_flags, proc)!=0) //CLONE_VM：如果设置了该标志，父进程和子进程将共享内存空间。
-                                      //具体来说，它们将使用相同的页表，这意味着它们可以访问相同的虚拟内存。
-    {
+    proc->parent = current;
+    assert(current->wait_state == 0);
+    if(setup_kstack(proc) != 0) {
         goto bad_fork_cleanup_proc;
     }
-    // 4. 调用 copy_thread 设置 proc_struct 中的 tf 和上下文
-    copy_thread(proc,stack,tf);
-    proc->parent = current;
-
-    // 5. 将 proc_struct 插入到 hash_list 和 proc_list 中
+    if(copy_mm(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_kstack;
+    }
+    // if(cow_copy_mm(proc) != 0) {
+    //     goto bad_fork_cleanup_kstack;
+    // }
+    copy_thread(proc, stack, tf);
     bool intr_flag;
     local_intr_save(intr_flag);
     {
         proc->pid = get_pid();
         hash_proc(proc);
-        list_add(&proc_list, &(proc->list_link));
-        nr_process ++;
+        set_links(proc);
     }
     local_intr_restore(intr_flag);
-    // 6. 调用 wakeup_proc 使新子进程变为可运行状态 (RUNNABLE)
     wakeup_proc(proc);
-    // 7. 使用子进程的 pid 设置返回值
-    ret = proc->pid; 
-
-
-// 函数的返回点
+    ret = proc->pid;
+ 
 fork_out:
     return ret;
 
-// 在分配内核栈失败时，释放已经分配的栈
 bad_fork_cleanup_kstack:
     put_kstack(proc);
-// 在进程分配失败时或其他错误发生时，释放已分配的进程结构体内存。    
 bad_fork_cleanup_proc:
     kfree(proc);
     goto fork_out;
@@ -474,15 +476,13 @@ do_exit(int error_code) {
     if (current == idleproc) {
         panic("idleproc exit.\n");
     }
-    if (current == initproc) {//一般是第一个创建的进程，它负责启动其他所有进程。
+    if (current == initproc) {
         panic("initproc exit.\n");
     }
     struct mm_struct *mm = current->mm;
     if (mm != NULL) {
-        lcr3(boot_cr3);//将当前进程的页目录寄存器设置为内核页表，以便进行清理。
+        lcr3(boot_cr3);
         if (mm_count_dec(mm) == 0) {
-        //递减内存结构体的引用计数，当计数变为 0 时，表示没有进程再使用该内存，接下来会释放进程的内存资源
-        //释放内存映射、释放页目录和销毁内存管理结构体
             exit_mmap(mm);
             put_pgdir(mm);
             mm_destroy(mm);
@@ -490,29 +490,22 @@ do_exit(int error_code) {
         current->mm = NULL;
     }
     current->state = PROC_ZOMBIE;
-    //    表示该进程已经结束，但它的父进程还没有回收它的资源（比如获取其退出状态）。exit_code 记录进程的退出码。
     current->exit_code = error_code;
     bool intr_flag;
     struct proc_struct *proc;
-    //current（即 proc）是一个正常运行的进程，并且它有子进程。执行 do_exit() 后，当前进程退出，并且所有的子进程关系都会被重新绑定到 initproc。
-    //initproc 被选为新的父进程
-    local_intr_save(intr_flag);//保存当前的中断状态，防止在操作过程中发生中断。
+    local_intr_save(intr_flag);
     {
         proc = current->parent;
         if (proc->wait_state == WT_CHILD) {
-            wakeup_proc(proc);//唤醒等待子进程的父进
+            wakeup_proc(proc);
         }
         while (current->cptr != NULL) {
-            //当前进程的第一个子进程。
-            //进入循环遍历所有子进程，直到没有子进程为止
             proc = current->cptr;
-            current->cptr = proc->optr;//当前进程的第一个子进程的older bro
-            //更新子进程指针，以便遍历下一个子进程。
+            current->cptr = proc->optr;
     
             proc->yptr = NULL;
             if ((proc->optr = initproc->cptr) != NULL) {
-                //将子进程的 optr（即老兄弟指针）设置为 initproc->cptr，即父进程的第一个子进程
-                initproc->cptr->yptr = proc;//系统初始化进程
+                initproc->cptr->yptr = proc;
             }
             proc->parent = initproc;
             initproc->cptr = proc;
@@ -532,11 +525,9 @@ do_exit(int error_code) {
  * @binary:  the memory addr of the content of binary program
  * @size:  the size of the content of binary program
  */
- //这个函数的目的是设置一个新的进程地址空间，加载可执行文件的代码和数据，并为进程创建适当的用户栈和其他内存区域
 static int
 load_icode(unsigned char *binary, size_t size) {
-    if (current->mm != NULL) {//当前进程的内存映射 (mm) 为空
-        //即将为当前进程创建新的地址空间
+    if (current->mm != NULL) {
         panic("load_icode: current->mm must be empty.\n");
     }
 
@@ -544,11 +535,9 @@ load_icode(unsigned char *binary, size_t size) {
     struct mm_struct *mm;
     //(1) create a new mm for current process
     if ((mm = mm_create()) == NULL) {
-        //创建一个新的内存管理结构 (mm_struct)，它将为进程分配新的地址空间
         goto bad_mm;
     }
     //(2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
-    //为进程创建新的页表目录，并将其添加到内存管理结构中
     if (setup_pgdir(mm) != 0) {
         goto bad_pgdir_cleanup_mm;
     }
@@ -556,12 +545,9 @@ load_icode(unsigned char *binary, size_t size) {
     struct Page *page;
     //(3.1) get the file header of the bianry program (ELF format)
     struct elfhdr *elf = (struct elfhdr *)binary;
-    //ELF 文件格式的头部 elfhdr 提供了程序的基本信息。
     //(3.2) get the entry of the program section headers of the bianry program (ELF format)
     struct proghdr *ph = (struct proghdr *)(binary + elf->e_phoff);
-    //通过 e_phoff 字段，我们获取程序头（proghdr），
     //(3.3) This program is valid?
-    //检查 ELF 文件的魔数（magic number）是否有效，如果无效则返回错误
     if (elf->e_magic != ELF_MAGIC) {
         ret = -E_INVAL_ELF;
         goto bad_elf_cleanup_pgdir;
@@ -571,7 +557,6 @@ load_icode(unsigned char *binary, size_t size) {
     struct proghdr *ph_end = ph + elf->e_phnum;
     for (; ph < ph_end; ph ++) {
     //(3.4) find every program section headers
-    //遍历每个程序头（proghdr），查找类型为 ELF_PT_LOAD 的段（即需要加载到内存的段）。每个段都有一个虚拟地址、文件大小和内存大小
         if (ph->p_type != ELF_PT_LOAD) {
             continue ;
         }
@@ -603,7 +588,6 @@ load_icode(unsigned char *binary, size_t size) {
      //(3.6) alloc memory, and  copy the contents of every program section (from, from+end) to process's memory (la, la+end)
         end = ph->p_va + ph->p_filesz;
      //(3.6.1) copy TEXT/DATA section of bianry program
-     //为每个段分配内存，并将 ELF 文件中的数据复制到对应的内存区域。使用 pgdir_alloc_page 分配页面内存，memcpy 将文件数据复制到内存。
         while (start < end) {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
                 goto bad_cleanup_mmap;
@@ -627,7 +611,6 @@ load_icode(unsigned char *binary, size_t size) {
             if (end < la) {
                 size -= la - end;
             }
-            //BSS 段用于存储未初始化的全局变量。在程序加载时，BSS 段的内存空间需要清零。
             memset(page2kva(page) + off, 0, size);
             start += size;
             assert((end < la && start == end) || (end >= la && start == la));
@@ -655,7 +638,6 @@ load_icode(unsigned char *binary, size_t size) {
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
     
     //(5) set current process's mm, sr3, and set CR3 reg = physical addr of Page Directory
-    //设置当前进程的内存结构和页表目录的物理地址，并更新 CR3 寄存器，以便 CPU 使用新的页表。
     mm_count_inc(mm);
     current->mm = mm;
     current->cr3 = PADDR(mm->pgdir);
@@ -674,8 +656,7 @@ load_icode(unsigned char *binary, size_t size) {
      *          tf->status should be appropriate for user program (the value of sstatus)
      *          hint: check meaning of SPP, SPIE in SSTATUS, use them by SSTATUS_SPP, SSTATUS_SPIE(defined in risv.h)
      */
-     //清空 trapframe，并设置为用户程序将使用的状态。接下来需要设置 tf->gpr.sp、tf->epc 和 tf->status，这些用于返回到用户态执行程序时恢复上下文。
-    tf->gpr.sp = USTACKTOP;//设置为用户栈的顶部地址
+     tf->gpr.sp = USTACKTOP;//设置为用户栈的顶部地址
     tf->epc = elf->e_entry;//设置为程序入口点（通常是 text segment 的起始地址）
     tf->status = sstatus & ~(SSTATUS_SPP | SSTATUS_SPIE);//设置为适当的状态标志，以确保当 sret 执行时，能够从内核态正确地切换到用户态。
 
@@ -697,7 +678,6 @@ bad_mm:
 int
 do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
     struct mm_struct *mm = current->mm;
-    //检查 name 指向的内存区域是否在用户进程的有效内存范围内。
     if (!user_mem_check(mm, (uintptr_t)name, len, 0)) {
         return -E_INVAL;
     }
@@ -705,7 +685,7 @@ do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
         len = PROC_NAME_LEN;
     }
 
-    char local_name[PROC_NAME_LEN + 1];//local_name 用于保存传入的程序名
+    char local_name[PROC_NAME_LEN + 1];
     memset(local_name, 0, sizeof(local_name));
     memcpy(local_name, name, len);
 
@@ -720,12 +700,9 @@ do_execve(const char *name, size_t len, unsigned char *binary, size_t size) {
         current->mm = NULL;
     }
     int ret;
-    //load_icode 用于加载新的程序二进制文件到内存中。如果加载失败，返回错误
     if ((ret = load_icode(binary, size)) != 0) {
         goto execve_exit;
     }
-    //set_proc_name(current, local_name);
-
     set_proc_name(current, local_name);
     return 0;
 
@@ -821,29 +798,23 @@ do_kill(int pid) {
     return -E_INVAL;
 }
 
-
-//do_execve() load_icode()里面只是构建了用户程序运行的上下文，但是并没有完成切换。上下文切换实际上要借助中断处理的返回来完成。
-//直接调用do_execve()是无法完成上下文切换的。
 // kernel_execve - do SYS_exec syscall to exec a user program called by user_main kernel_thread
 static int
 kernel_execve(const char *name, unsigned char *binary, size_t size) {
     int64_t ret=0, len = strlen(name);
  //   ret = do_execve(name, len, binary, size);
- //用ebreak产生断点中断进行处理，通过设置a7寄存器的值为10说明这不是一个普通的断点中断，而是要转发到syscall()
     asm volatile(
-        "li a0, %1\n"//%1 是第一个输入参数，表示 SYS_exec 常量
+        "li a0, %1\n"
         "lw a1, %2\n"
         "lw a2, %3\n"
         "lw a3, %4\n"
         "lw a4, %5\n"
-    	"li a7, 10\n"//将系统调用号 10（假设为 execve）加载到 a7 中。根据 RISC-V 的 ABI 规范，a7 寄存器用来存储系统调用号
+    	"li a7, 10\n"
         "ebreak\n"
-        "sw a0, %0\n"//系统调用的返回值会存储在 a0 寄存器中，使用 sw 指令将 a0 寄存器的值存储到 ret 变量中
+        "sw a0, %0\n"
         : "=m"(ret)
         : "i"(SYS_exec), "m"(name), "m"(len), "m"(binary), "m"(size)
         : "memory");
-        //SYS_exec 是 execve 系统调用的编号。
-        //name、len、binary、size 分别是程序名、程序名长度、程序二进制文件内容以及二进制文件的大小。
     cprintf("ret = %d\n", ret);
     return ret;
 }
